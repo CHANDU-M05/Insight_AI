@@ -1,0 +1,160 @@
+"""
+InsightAI Reporter
+Session → PDF report.
+WHY PDF export: managers don't live in chat windows.
+They need something they can forward.
+This is the feature that makes InsightAI useful beyond the individual analyst.
+"""
+
+import io
+from datetime import datetime
+from fpdf import FPDF
+import plotly.io as pio
+from pathlib import Path
+
+
+class InsightReport(FPDF):
+    def header(self):
+        self.set_font("Helvetica", "B", 14)
+        self.cell(0, 10, "InsightAI — Data Analysis Report", ln=True, align="C")
+        self.set_font("Helvetica", "", 9)
+        self.cell(0, 6, f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M')}", ln=True, align="C")
+        self.ln(4)
+        self.set_draw_color(200, 200, 200)
+        self.line(10, self.get_y(), 200, self.get_y())
+        self.ln(4)
+
+    def footer(self):
+        self.set_y(-15)
+        self.set_font("Helvetica", "I", 8)
+        self.cell(0, 10, f"Page {self.page_no()} | InsightAI — github.com/CHANDU-M05", align="C")
+
+
+def generate_report(
+    filename: str,
+    profile,
+    history: list[dict],
+    figures: list = None,
+) -> bytes:
+    """
+    Generate PDF report from session.
+    Includes: dataset profile + all Q&A pairs + charts.
+    """
+    pdf = InsightReport()
+    pdf.set_auto_page_break(auto=True, margin=15)
+    pdf.add_page()
+    pdf.set_font("Helvetica", "", 10)
+
+    # ── Dataset Profile ──
+    pdf.set_font("Helvetica", "B", 12)
+    pdf.cell(0, 8, "Dataset Profile", ln=True)
+    pdf.set_font("Helvetica", "", 10)
+    pdf.ln(2)
+
+    profile_lines = [
+        f"File: {profile.filename}",
+        f"Rows: {profile.row_count:,} | Columns: {profile.col_count}",
+        f"Missing values: {profile.total_nulls:,} ({profile.null_pct}%)",
+        f"Numeric columns: {', '.join(profile.numeric_cols) or 'None'}",
+        f"Categorical columns: {', '.join(profile.categorical_cols) or 'None'}",
+    ]
+    for line in profile_lines:
+        try:
+            pdf.cell(0, 6, line, ln=True)
+        except Exception:
+            pass
+
+    # Warnings
+    if profile.warnings:
+        pdf.ln(2)
+        pdf.set_font("Helvetica", "B", 10)
+        pdf.cell(0, 6, "Warnings:", ln=True)
+        pdf.set_font("Helvetica", "", 10)
+        for w in profile.warnings:
+            try:
+                pdf.multi_cell(0, 5, f"  - {w}")
+            except Exception:
+                pass
+
+    # Top correlations
+    if profile.top_correlations:
+        pdf.ln(2)
+        pdf.set_font("Helvetica", "B", 10)
+        pdf.cell(0, 6, "Top Correlations:", ln=True)
+        pdf.set_font("Helvetica", "", 10)
+        for c in profile.top_correlations[:3]:
+            try:
+                pdf.cell(0, 5, f"  {c['col1']} ↔ {c['col2']}: {c['correlation']}", ln=True)
+            except Exception:
+                pass
+
+    pdf.ln(4)
+    pdf.set_draw_color(200, 200, 200)
+    pdf.line(10, pdf.get_y(), 200, pdf.get_y())
+    pdf.ln(4)
+
+    # ── Q&A History ──
+    if history:
+        pdf.set_font("Helvetica", "B", 12)
+        pdf.cell(0, 8, "Analysis Session", ln=True)
+        pdf.ln(2)
+
+        for i, entry in enumerate(history):
+            # Question
+            pdf.set_font("Helvetica", "B", 10)
+            try:
+                pdf.multi_cell(0, 6, f"Q{i+1}: {entry['question']}")
+            except Exception:
+                pass
+            pdf.ln(1)
+
+            # Answer explanation
+            if entry.get("explanation"):
+                pdf.set_font("Helvetica", "", 10)
+                try:
+                    pdf.multi_cell(0, 5, entry["explanation"])
+                except Exception:
+                    pass
+                pdf.ln(1)
+
+            # Code
+            if entry.get("code"):
+                pdf.set_font("Courier", "", 8)
+                pdf.set_fill_color(245, 245, 245)
+                try:
+                    for line in entry["code"].split('\n')[:15]:
+                        pdf.cell(0, 4, line[:100], ln=True, fill=True)
+                    if len(entry["code"].split('\n')) > 15:
+                        pdf.cell(0, 4, "... (truncated)", ln=True, fill=True)
+                except Exception:
+                    pass
+                pdf.set_font("Helvetica", "", 10)
+                pdf.ln(2)
+
+            # Chart
+            if figures and i < len(figures) and figures[i] is not None:
+                try:
+                    img_bytes = pio.to_image(figures[i], format="png", width=600, height=300)
+                    img_path = f"/tmp/insightai_chart_{i}.png"
+                    with open(img_path, "wb") as f:
+                        f.write(img_bytes)
+                    pdf.image(img_path, w=180)
+                    pdf.ln(2)
+                except Exception:
+                    pass
+
+            pdf.ln(3)
+            pdf.set_draw_color(230, 230, 230)
+            pdf.line(10, pdf.get_y(), 200, pdf.get_y())
+            pdf.ln(3)
+
+    # ── Footer disclaimer ──
+    pdf.ln(4)
+    pdf.set_font("Helvetica", "I", 8)
+    pdf.multi_cell(0, 4,
+        "This report was generated by InsightAI. "
+        "Results are based on the uploaded dataset and AI-generated code. "
+        "Always verify findings before making business decisions."
+    )
+
+    return bytes(pdf.output())

@@ -1,0 +1,9 @@
+.env
+__pycache__/
+*.py[cod]
+.DS_Store
+*.log
+venv/
+env/
+*.pdf
+/tmp/insightai_*.png
